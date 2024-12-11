@@ -22,6 +22,9 @@
 # include <M5StackUpdater.h>
 #endif
 
+#define SDU_ENABLE_GZ
+#include <M5StackUpdater.h>
+
 #include <esp_system.h>
 #include <esp_idf_version.h>
 
@@ -223,116 +226,120 @@ static bool playMovie(const String& path, const bool bus = true)
 
 void setup()
 {
-    // M5Unified
-    auto cfg = M5.config();
+  // M5Unified
+  auto cfg = M5.config();
 #if defined(__M5GFX_M5MODULEDISPLAY__)
-    cfg.module_display.logical_width = 320;
-    cfg.module_display.logical_height = 240;
+  cfg.module_display.logical_width = 320;
+  cfg.module_display.logical_height = 240;
 #endif
-    M5.begin(cfg);
-    M5.Log.setEnableColor(m5::log_target_t::log_target_serial, false);
-    display.clear(TFT_DARKGRAY);
+  M5.begin(cfg);
 
-    // Speaker settings
-    auto spk_cfg = M5.Speaker.config();
+  // for SD-Updater
+  checkSDUpdater( SD, MENU_BIN, 5000 );
+
+  M5.Log.setEnableColor(m5::log_target_t::log_target_serial, false);
+  display.clear(TFT_DARKGRAY);
+
+  // Speaker settings
+  auto spk_cfg = M5.Speaker.config();
 #if defined(__M5GFX_M5MODULEDISPLAY__)
-    // Choose Display if Display module and cable connected
-    int32_t idx = M5.getDisplayIndex(m5gfx::board_M5ModuleDisplay);
-    M5_LOGI("ModuleDisplay?:%d",idx);
-    if (idx >= 0)
-    {
-        uint8_t buf[256];
-        //auto dsp = &M5.Displays(idx);
-        if (0 < ((lgfx::Panel_M5HDMI*)(M5.Displays(idx).panel()))->readEDID(buf, sizeof(buf)))
-        {
-            M5_LOGI("Detected the display, Set Display primary");            
-            primaryDisplay = true;
-            M5.setPrimaryDisplay(idx);
-            // Speaker settings for ModuleDisplay
+  // Choose Display if Display module and cable connected
+  int32_t idx = M5.getDisplayIndex(m5gfx::board_M5ModuleDisplay);
+  M5_LOGI("ModuleDisplay?:%d",idx);
+  if (idx >= 0)
+  {
+      uint8_t buf[256];
+      //auto dsp = &M5.Displays(idx);
+      if (0 < ((lgfx::Panel_M5HDMI*)(M5.Displays(idx).panel()))->readEDID(buf, sizeof(buf)))
+      {
+          M5_LOGI("Detected the display, Set Display primary");            
+          primaryDisplay = true;
+          M5.setPrimaryDisplay(idx);
+          // Speaker settings for ModuleDisplay
 #if defined ( CONFIG_IDF_TARGET_ESP32S3 )
-            static constexpr const uint8_t pins[][2] =
-                    {// DOUT       , BCK
-                        { GPIO_NUM_13, GPIO_NUM_6 }, // CoreS3 + ModuleDisplay
-                    };
-            int pins_index = 0;
+          static constexpr const uint8_t pins[][2] =
+                  {// DOUT       , BCK
+                      { GPIO_NUM_13, GPIO_NUM_6 }, // CoreS3 + ModuleDisplay
+                  };
+          int pins_index = 0;
 #else
-            static constexpr const uint8_t pins[][2] =
-                    {// DOUT       , BCK
-                        { GPIO_NUM_2 , GPIO_NUM_27 }, // Core2 and Tough + ModuleDisplay
-                        { GPIO_NUM_15, GPIO_NUM_12 }, // Core + ModuleDisplay
-                    };
-            // !core is (Core2 + Tough)
-            int pins_index = (M5.getBoard() == m5::board_t::board_M5Stack) ? 1 : 0;
+          static constexpr const uint8_t pins[][2] =
+                  {// DOUT       , BCK
+                      { GPIO_NUM_2 , GPIO_NUM_27 }, // Core2 and Tough + ModuleDisplay
+                      { GPIO_NUM_15, GPIO_NUM_12 }, // Core + ModuleDisplay
+                  };
+          // !core is (Core2 + Tough)
+          int pins_index = (M5.getBoard() == m5::board_t::board_M5Stack) ? 1 : 0;
 #endif
-            spk_cfg.pin_data_out = pins[pins_index][0];
-            spk_cfg.pin_bck      = pins[pins_index][1];
-            spk_cfg.pin_ws       = GPIO_NUM_0;     // LRCK
-            spk_cfg.i2s_port = I2S_NUM_1;
-            spk_cfg.sample_rate = 48000; // Module Display audio output is fixed at 48 kHz
-            spk_cfg.magnification = 16;
-            spk_cfg.stereo = true;
-            spk_cfg.buzzer = false;
-            spk_cfg.use_dac = false;
-        }
-    }
+          spk_cfg.pin_data_out = pins[pins_index][0];
+          spk_cfg.pin_bck      = pins[pins_index][1];
+          spk_cfg.pin_ws       = GPIO_NUM_0;     // LRCK
+          spk_cfg.i2s_port = I2S_NUM_1;
+          spk_cfg.sample_rate = 48000; // Module Display audio output is fixed at 48 kHz
+          spk_cfg.magnification = 16;
+          spk_cfg.stereo = true;
+          spk_cfg.buzzer = false;
+          spk_cfg.use_dac = false;
+      }
+  }
 #endif
-    M5_LOGI("Speaker sample_rate:%u dma_buf_len:%u dma_buf_count:%u", spk_cfg.sample_rate, spk_cfg.dma_buf_len, spk_cfg.dma_buf_count);
-    M5.Speaker.config(spk_cfg);
+  M5_LOGI("Speaker sample_rate:%u dma_buf_len:%u dma_buf_count:%u", spk_cfg.sample_rate, spk_cfg.dma_buf_len, spk_cfg.dma_buf_count);
+  M5.Speaker.config(spk_cfg);
 
-    M5_LOGI("Output to %s", primaryDisplay ? "Display" : "Lcd");
-    volume = M5.Speaker.getVolume();
-    
+  M5_LOGI("Output to %s", primaryDisplay ? "Display" : "Lcd");
+  volume = M5.Speaker.getVolume();
+  
 #if defined(FBSD_ENABLE_SD_UPDATER)
-    // SD-Updater
-    SDUCfg.setAppName("M5Stack_FlipBookSD");
-    SDUCfg.setBinFileName("/M5Stack_FlipBookSD.bin");
-    auto SdFatSPIConfig = SdSpiConfig( TFCARD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(25) );
-    checkSDUpdater(sd, String(MENU_BIN), 2000, &SdFatSPIConfig);
+  // SD-Updater
+  SDUCfg.setAppName("M5Stack_FlipBookSD");
+  SDUCfg.setBinFileName("/M5Stack_FlipBookSD.bin");
+  auto SdFatSPIConfig = SdSpiConfig( TFCARD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(25) );
+  checkSDUpdater(sd, String(MENU_BIN), 2000, &SdFatSPIConfig);
 #endif
-    
-    // SdFat
-    int retry = 10;
-    bool mounted{};
-    while(retry-- && !(mounted = sd.begin((unsigned)TFCARD_CS_PIN, SD_SCK_MHZ(25))) ) { delay(100); }
-    if(!mounted) { M5_LOGE("Failed to mount %xH", sd.sdErrorCode()); display.clear(TFT_RED); while(1) { delay(10000); } }
-    
-    // 
-    if(display.width() < display.height()) { display.setRotation(display.getRotation() ^ 1); }
-    display.setBrightness(128);
-    display.setFont(&Font2);
-    display.setTextDatum(textdatum_t::top_center);
-    display.clear(0);
+  
+  // SdFat
+  int retry = 10;
+  bool mounted{};
+  while(retry-- && !(mounted = sd.begin((unsigned)TFCARD_CS_PIN, SD_SCK_MHZ(25))) ) { delay(100); }
+  if(!mounted) { M5_LOGE("Failed to mount %xH", sd.sdErrorCode()); display.clear(TFT_RED); while(1) { delay(10000); } }
+  
+  // 
+  if(display.width() < display.height()) { display.setRotation(display.getRotation() ^ 1); }
+  display.setBrightness(128);
+  display.setFont(&Font2);
+  display.setTextDatum(textdatum_t::top_center);
+  display.clear(0);
 
-    M5.BtnA.setHoldThresh(500);
-    M5.BtnB.setHoldThresh(500);
-    M5.BtnC.setHoldThresh(500);
-    unifiedButton.begin(&display);
+  M5.BtnA.setHoldThresh(500);
+  M5.BtnB.setHoldThresh(500);
+  M5.BtnC.setHoldThresh(500);
+  unifiedButton.begin(&display);
 
-    // file list (Search "/gcf" if "/gmv" is empty or not exists.)
-    if(list.make("/gmv", "gmv") == 0)
-    {
-        M5_LOGI("Research directory gcf");
-        list.make("/gcf", "gmv");
-    }
-    
-    // Allocate buffer
-    for(auto& buf : buffers)
-    {
-        buf = (uint8_t*)heap_caps_malloc(BUFFER_SIZE,  MALLOC_CAP_DMA); // For DMA transfer
-        assert(buf);
-        M5_LOGI("Buffer:%p", buf);
-    }
-    
-    mainClass.setup(&display);
-    
-    // Information
-    M5_LOGI("ESP-IDF Version %d.%d.%d",
-           (ESP_IDF_VERSION>>16) & 0xFF, (ESP_IDF_VERSION>>8)&0xFF, ESP_IDF_VERSION & 0xFF);
-    M5_LOGI("End of setup free:%u internal:%u large internal:%u",
-            esp_get_free_heap_size(), esp_get_free_internal_heap_size(),
-            heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
-    
-    lastTime = ESP32Clock::now();
+  // file list (Search "/gcf" if "/gmv" is empty or not exists.)
+  if(list.make("/gmv", "gmv") == 0)
+  {
+      M5_LOGI("Research directory gcf");
+      list.make("/gcf", "gmv");
+  }
+  
+  // Allocate buffer
+  for(auto& buf : buffers)
+  {
+      buf = (uint8_t*)heap_caps_malloc(BUFFER_SIZE,  MALLOC_CAP_DMA); // For DMA transfer
+      assert(buf);
+      M5_LOGI("Buffer:%p", buf);
+  }
+  
+  mainClass.setup(&display);
+  
+  // Information
+  M5_LOGI("ESP-IDF Version %d.%d.%d",
+          (ESP_IDF_VERSION>>16) & 0xFF, (ESP_IDF_VERSION>>8)&0xFF, ESP_IDF_VERSION & 0xFF);
+  M5_LOGI("End of setup free:%u internal:%u large internal:%u",
+          esp_get_free_heap_size(), esp_get_free_internal_heap_size(),
+          heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+  
+  lastTime = ESP32Clock::now();
 }
 
 using loop_function = void(*)();
@@ -495,4 +502,3 @@ void loop()
     unifiedButton.update();
     loop_f();
 }
-
