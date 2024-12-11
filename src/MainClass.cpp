@@ -25,7 +25,7 @@ bool MainClass::setup(LovyanGFX* lcd)
         assert(_dmabufs[i]);
     }
     _dmabuf = _dmabufs[0];
-
+    
     _jdec.multitask_begin();
     _busy = false;
     return true;
